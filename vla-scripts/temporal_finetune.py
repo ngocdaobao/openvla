@@ -168,7 +168,7 @@ def run_forward_pass(
         projected_temporal = align_projector(temporal_features)
         align_loss = compute_cosine_align_loss(projected_temporal, vision_hidden)
     loss += align_loss
-    
+
     return output, loss, align_loss
 
 
@@ -403,7 +403,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                     step=gradient_step_idx,
                 )
 
-            # Optimizer Step
+            # Optimizer 
             if (batch_idx + 1) % cfg.grad_accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
