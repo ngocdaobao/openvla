@@ -26,8 +26,11 @@ from pathlib import Path
 from typing import Optional
 
 import draccus
+import numpy as np
 import torch
 import torch.distributed as dist
+import torch.nn as nn
+import torch.nn.functional as F
 import tqdm
 from accelerate import PartialState
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
@@ -49,6 +52,7 @@ from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
 from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 
+from temporal_align import TemporalAlignProjector, prepare_videoprism_inputs, resize_token_sequence, compute_cosine_align_loss
 from videoprism.videoprism import models as vp
 
 # Sane Defaults
@@ -110,10 +114,64 @@ class FinetuneConfig:
     run_id_note: Optional[str] = None                               # Extra note for logging, Weights & Biases
 
     num_temporal_frames: int = 16                                   # Number of temporal frames to use for fine-tuning
+    video_prism_path: str = "videoprism_public_v1_base"             # VideoPrism encoder config/checkpoint name
+    align_loss_coeff: float = 0.5                                   # Weight applied to cosine alignment loss
+    vla_layer_align: int = -1                                       # Which VLA hidden-state layer to align against
     # fmt: on
 
 
-@draccus.wrap()
+
+def run_forward_pass(
+    vla,
+    video_encoder,
+    align_projector,
+    processor,
+    batch,
+    vla_layer_align: int,
+    video_encoder_loaded_state,
+    device_id,
+):
+
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        output: CausalLMOutputWithPast = vla(
+            input_ids=batch["input_ids"].to(device_id),
+            attention_mask=batch["attention_mask"].to(device_id),
+            pixel_values=batch["pixel_values"].to(torch.bfloat16).to(device_id),
+            labels=batch["labels"],
+            output_hidden_states=True,
+        )
+
+    loss = output.loss
+    
+    # Extract vision hidden states from the selected layer.
+    num_vision_tokens = vla.module.vision_backbone.featurizer.patch_embed.num_patches
+    image_token_id = vla.module.config.image_token_id
+    input_ids = batch["input_ids"].to(device_id)
+    vision_start = (input_ids == image_token_id).int().argmax(dim=1)
+    layer_h = output.hidden_states[vla_layer_align]
+    vision_hidden = torch.stack(
+        [layer_h[i, s : s + num_vision_tokens] for i, s in enumerate(vision_start)],
+        dim=0,
+    )
+
+    videoprism_inputs = prepare_videoprism_inputs(batch["video_frames"].to(device_id), processor.image_processor)
+    temporal_features, _ = video_encoder.apply(
+        video_encoder_loaded_state,
+        videoprism_inputs,
+        train=False,
+        return_intermediate=("spatial_features",),
+    )
+    temporal_features = torch.from_numpy(np.asarray(temporal_features)).to(device_id=device_id, dtype=vision_hidden.dtype)
+    temporal_features = resize_token_sequence(temporal_features, vision_hidden.shape[1])
+
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        projected_temporal = align_projector(temporal_features)
+        align_loss = compute_cosine_align_loss(projected_temporal, vision_hidden)
+    loss += align_loss
+    
+    return output, loss, align_loss
+
+
 def finetune(cfg: FinetuneConfig) -> None:
     print(f"Fine-tuning OpenVLA Model `{cfg.vla_path}` on `{cfg.dataset_name}`")
 
@@ -187,15 +245,29 @@ def finetune(cfg: FinetuneConfig) -> None:
     # Wrap VLA in PyTorch DDP Wrapper for Multi-GPU Training
     vla = DDP(vla, device_ids=[device_id], find_unused_parameters=True, gradient_as_bucket_view=True)
 
-    # Create Optimizer =>> note that we default to a simple constant learning rate!
-    trainable_params = [param for param in vla.parameters() if param.requires_grad]
-    optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
-
     # Create Action Tokenizer
     action_tokenizer = ActionTokenizer(processor.tokenizer)
 
-    video_prism = vp.get_model("videoprism_public_v1_base")
-    video_prism = video_prism.to(device_id)
+    video_prism = vp.get_model(cfg.video_prism_path)
+    video_prism_loaded_state = vp.load_pretrained_weights(cfg.video_prism_path)
+    video_prism_dim = getattr(video_prism, "model_dim", None)
+    if video_prism_dim is None:
+        video_prism_dim = vp.CONFIGS[cfg.video_prism_path]["model_dim"]
+    align_projector = TemporalAlignProjector(
+        input_dim=video_prism_dim,
+        output_dim=vla.module.config.text_config.hidden_size,
+    ).to(device_id)
+    align_projector = DDP(
+        align_projector,
+        device_ids=[device_id],
+        find_unused_parameters=False,
+        gradient_as_bucket_view=True,
+    )
+
+    # Create Optimizer =>> note that we default to a simple constant learning rate!
+    trainable_params = [param for param in vla.parameters() if param.requires_grad]
+    trainable_params.extend(param for param in align_projector.parameters() if param.requires_grad)
+    optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
 
     # Load Fine-tuning Dataset =>> note that we use an RLDS-formatted dataset following Open X-Embodiment by default.
     #   =>> If you want to use a non-RLDS dataset (e.g., a standard PyTorch Dataset) see the following commented block.
@@ -217,6 +289,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         processor.tokenizer,
         image_transform=processor.image_processor.apply_transform,
         prompt_builder_fn=PurePromptBuilder if "v01" not in cfg.vla_path else VicunaV15ChatPromptBuilder,
+        window_size=cfg.num_temporal_frames,
     )
     vla_dataset = RLDSDataset(
         cfg.data_root_dir,
@@ -250,22 +323,28 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     # Deque to store recent train metrics (used for computing smoothened metrics for gradient accumulation)
     recent_losses = deque(maxlen=cfg.grad_accumulation_steps)
+    recent_action_losses = deque(maxlen=cfg.grad_accumulation_steps)
+    recent_align_losses = deque(maxlen=cfg.grad_accumulation_steps)
     recent_action_accuracies = deque(maxlen=cfg.grad_accumulation_steps)
     recent_l1_losses = deque(maxlen=cfg.grad_accumulation_steps)
 
     # Train!
     with tqdm.tqdm(total=cfg.max_steps, leave=False) as progress:
         vla.train()
+        align_projector.train()
         optimizer.zero_grad()
         for batch_idx, batch in enumerate(dataloader):
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                output: CausalLMOutputWithPast = vla(
-                    input_ids=batch["input_ids"].to(device_id),
-                    attention_mask=batch["attention_mask"].to(device_id),
-                    pixel_values=batch["pixel_values"].to(torch.bfloat16).to(device_id),
-                    labels=batch["labels"],
-                )
-                loss = output.loss
+            output, action_loss, align_loss = run_forward_pass(
+                vla=vla,
+                video_encoder=video_prism,
+                align_projector=align_projector,
+                processor=processor,
+                batch=batch,
+                vla_layer_align=cfg.vla_layer_align,
+                video_encoder_loaded_state=video_prism_loaded_state,
+                device_id=device_id,
+            )
+            loss = action_loss + cfg.align_loss_coeff * align_loss
 
             # Normalize loss to account for gradient accumulation
             normalized_loss = loss / cfg.grad_accumulation_steps
@@ -294,6 +373,8 @@ def finetune(cfg: FinetuneConfig) -> None:
 
             # Store recent train metrics
             recent_losses.append(loss.item())
+            recent_action_losses.append(action_loss.item())
+            recent_align_losses.append(align_loss.item())
             recent_action_accuracies.append(action_accuracy.item())
             recent_l1_losses.append(action_l1_loss.item())
 
@@ -304,6 +385,8 @@ def finetune(cfg: FinetuneConfig) -> None:
             #   =>> Equal to current step metrics when not using gradient accumulation
             #   =>> Otherwise, equal to the average of metrics observed over micro-batches used for gradient accumulation
             smoothened_loss = sum(recent_losses) / len(recent_losses)
+            smoothened_action_loss = sum(recent_action_losses) / len(recent_action_losses)
+            smoothened_align_loss = sum(recent_align_losses) / len(recent_align_losses)
             smoothened_action_accuracy = sum(recent_action_accuracies) / len(recent_action_accuracies)
             smoothened_l1_loss = sum(recent_l1_losses) / len(recent_l1_losses)
 
@@ -312,6 +395,8 @@ def finetune(cfg: FinetuneConfig) -> None:
                 wandb.log(
                     {
                         "train_loss": smoothened_loss,
+                        "action_loss": smoothened_action_loss,
+                        "align_loss": smoothened_align_loss,
                         "action_accuracy": smoothened_action_accuracy,
                         "l1_loss": smoothened_l1_loss,
                     },
@@ -335,6 +420,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                     # Save Processor & Weights
                     processor.save_pretrained(run_dir)
                     vla.module.save_pretrained(save_dir)
+                    torch.save(align_projector.module.state_dict(), run_dir / "align_projector.pt")
 
                 # Wait for processor and adapter weights to be saved by main process
                 dist.barrier()
@@ -364,6 +450,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                             # Save processor and model weights to new directory
                             processor.save_pretrained(checkpoint_dir)
                             merged_vla.save_pretrained(checkpoint_dir)
+                            torch.save(align_projector.module.state_dict(), checkpoint_dir / "align_projector.pt")
 
                             print(f"Saved Model Checkpoint for Step {gradient_step_idx} at: {checkpoint_dir}")
 
