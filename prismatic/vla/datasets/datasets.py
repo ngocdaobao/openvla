@@ -34,11 +34,14 @@ class RLDSBatchTransform:
     image_transform: ImageTransform
     prompt_builder_fn: Type[PromptBuilder]
     predict_stop_token: bool = True
+    window_size: int = 1
 
     def __call__(self, rlds_batch: Dict[str, Any]) -> Dict[str, Any]:
         """Converts a RLDS batch to the format expected by the OpenVLA collator/models."""
         dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
-        img = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
+        frames = rlds_batch["observation"]["image_primary"]
+        current_index = max(self.window_size - 1, 0)
+        img = Image.fromarray(frames[current_index])
         lang = rlds_batch["task"]["language_instruction"].decode().lower()
 
         # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
@@ -58,13 +61,22 @@ class RLDSBatchTransform:
         #   =>> IMPORTANT :: IF WE'RE USING HF LLM.forward(..., labels=labels), SHIFTING HAPPENS _INSIDE_ MODEL!
         input_ids, labels = torch.tensor(input_ids), torch.tensor(labels)
         pixel_values = self.image_transform(img)
+        video_frames = torch.stack(
+            [self.image_transform(Image.fromarray(frame)) for frame in frames]
+        )
 
         # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
         labels[: -(len(action) + 1)] = IGNORE_INDEX
         if not self.predict_stop_token:
             labels[-1] = IGNORE_INDEX
 
-        return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name)
+        return dict(
+            pixel_values=pixel_values,
+            video_frames=video_frames,
+            input_ids=input_ids,
+            labels=labels,
+            dataset_name=dataset_name,
+        )
 
 
 class RLDSDataset(IterableDataset):
@@ -74,6 +86,7 @@ class RLDSDataset(IterableDataset):
         data_mix: str,
         batch_transform: RLDSBatchTransform,
         resize_resolution: Tuple[int, int],
+        window_size: int = 1,
         shuffle_buffer_size: int = 256_000,
         train: bool = True,
         image_aug: bool = False,
@@ -100,7 +113,7 @@ class RLDSDataset(IterableDataset):
         )
         rlds_config = dict(
             traj_transform_kwargs=dict(
-                window_size=1,                                      # If we wanted to feed / predict more than one step
+                window_size=window_size,                             # If we want to feed more than one step
                 future_action_window_size=0,                        # For action chunking
                 skip_unlabeled=True,                                # Skip trajectories without language labels
                 goal_relabeling_strategy="uniform",                 # Goals are currently unused
