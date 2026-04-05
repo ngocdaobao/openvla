@@ -1,2 +1,2 @@
-export WANDB_API_KEY=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
+export WANDB_API_KEY=""
 torchrun --nproc-per-node=2 --master_addr=127.0.0.1 --master_port=29500 vla-scripts/temporal_finetune.py 
