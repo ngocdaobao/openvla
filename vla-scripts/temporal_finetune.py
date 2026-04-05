@@ -53,7 +53,7 @@ from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 
 from temporal_align import TemporalAlignProjector, prepare_videoprism_inputs, resize_token_sequence, compute_cosine_align_loss
-from openvla.videoprism_.videoprism import models as vp
+from openvla.videoprism import models as vp
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
