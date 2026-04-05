@@ -25,7 +25,7 @@ from flax import linen as nn
 import jax
 from jax import numpy as jnp
 import numpy as np
-from videoprism import layers
+from . import layers
 
 Array = jax.Array
 Variables = nn.module.VariableDict
