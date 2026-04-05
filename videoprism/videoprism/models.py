@@ -44,9 +44,9 @@ import jax
 import jax.numpy as jnp
 import huggingface_hub
 import numpy as np
-from videoprism import encoders
-from videoprism import tokenizers
-from videoprism import utils
+from . import encoders
+from . import tokenizers
+from . import utils
 
 K400_NUM_CLASSES: int = 400
 SSV2_NUM_CLASSES: int = 174
