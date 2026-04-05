@@ -144,15 +144,9 @@ def run_forward_pass(
     loss = output.loss
     
     # Extract vision hidden states from the selected layer.
-    num_vision_tokens = vla.module.vision_backbone.featurizer.patch_embed.num_patches
-    image_token_id = vla.module.config.image_token_id
-    input_ids = batch["input_ids"].to(device_id)
-    vision_start = (input_ids == image_token_id).int().argmax(dim=1)
+    num_vision_tokens = output.projector_features.shape[1]
     layer_h = output.hidden_states[vla_layer_align]
-    vision_hidden = torch.stack(
-        [layer_h[i, s : s + num_vision_tokens] for i, s in enumerate(vision_start)],
-        dim=0,
-    )
+    vision_hidden = layer_h[:, 1 : 1 + num_vision_tokens, :]
 
     videoprism_inputs = prepare_videoprism_inputs(batch["video_frames"].to(device_id), processor.image_processor)
     temporal_features, _ = video_encoder.apply(
