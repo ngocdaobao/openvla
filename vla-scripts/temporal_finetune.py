@@ -143,6 +143,8 @@ def run_forward_pass(
 
     loss = output.loss
     print(f'Shape of output hidden states: {output.hidden_states[-1].shape}')
+    print(f'Shape of vision hidden states: {output.projector_features.shape}')
+    print(f'Shape of language instruction features: {output.instruction_features.shape}')
     # Extract vision hidden states from the selected layer.
     num_vision_tokens = output.projector_features.shape[1]
     layer_h = output.hidden_states[vla_layer_align]
