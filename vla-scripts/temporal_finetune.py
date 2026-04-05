@@ -148,7 +148,7 @@ def run_forward_pass(
     # Extract vision hidden states from the selected layer.
     num_vision_tokens = output.projector_features.shape[1]
     layer_h = output.hidden_states[vla_layer_align]
-    vision_hidden = layer_h[:, 1 : 1 + num_vision_tokens, :]
+    vision_hidden = layer_h[:, :num_vision_tokens, :]
 
     videoprism_inputs = prepare_videoprism_inputs(batch["video_frames"].to(device_id), processor.image_processor)
     temporal_features, _ = video_encoder.apply(
