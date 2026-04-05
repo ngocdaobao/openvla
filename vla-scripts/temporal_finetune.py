@@ -172,6 +172,7 @@ def run_forward_pass(
     return output, loss, align_loss
 
 
+@draccus.wrap()
 def finetune(cfg: FinetuneConfig) -> None:
     print(f"Fine-tuning OpenVLA Model `{cfg.vla_path}` on `{cfg.dataset_name}`")
 
