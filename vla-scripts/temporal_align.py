@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
-from prismatic.data_processors.image_processor import PrismaticImageProcessor
+from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor
 
 class TemporalAlignProjector(nn.Module):
     def __init__(self, input_dim: int, output_dim: int) -> None:
