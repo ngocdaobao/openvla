@@ -1,6 +1,6 @@
 import csv
 
-from videoprism.videoprism import models as vp
+from openvla.videoprism_.videoprism import models as vp
 import jax
 import jax.numpy as jnp
 try:
