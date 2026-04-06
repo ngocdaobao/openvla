@@ -308,7 +308,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     video_prism_loaded_state = vp.load_pretrained_weights(cfg.video_prism_path)
     # video_prism_loaded_state = _adapt_videoprism_patch_projection_kernel(
     #     video_prism, video_prism_loaded_state
-    # )
+    # 
     video_prism_dim = getattr(video_prism, "model_dim", None)
     if video_prism_dim is None:
         video_prism_dim = vp.CONFIGS[cfg.video_prism_path]["model_dim"]
