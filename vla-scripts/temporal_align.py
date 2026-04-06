@@ -5,7 +5,7 @@ import numpy as np
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor
 
 class TemporalAlignProjector(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int) -> None:
+    def __init__(self, input_dim: int, output_dim: int, train: bool = True) -> None:
         super().__init__()
         hidden_dim = max(input_dim, output_dim)
         self.projector = nn.Sequential(
@@ -21,15 +21,14 @@ class TemporalAlignProjector(nn.Module):
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
+            
 
     def forward(self, temporal_features: torch.Tensor) -> torch.Tensor:
         return self.projector(temporal_features)
 
 
 def prepare_videoprism_inputs(video_frames: torch.Tensor, image_processor: PrismaticImageProcessor) -> np.ndarray:
-    mean = torch.tensor(image_processor.means[0], device=video_frames.device, dtype=video_frames.dtype).view(1, 1, 3, 1, 1)
-    std = torch.tensor(image_processor.stds[0], device=video_frames.device, dtype=video_frames.dtype).view(1, 1, 3, 1, 1)
-    video_frames = (video_frames * std + mean).clamp(0.0, 1.0)
+    print(f"Original video frames shape: {video_frames.shape}")
     return video_frames.permute(0, 1, 3, 4, 2).contiguous().float().cpu().numpy()
 
 
