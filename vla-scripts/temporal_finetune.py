@@ -40,6 +40,7 @@ from flax.core import freeze, unfreeze
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConfig
 from transformers import AutoConfig, AutoImageProcessor
@@ -149,6 +150,9 @@ class FinetuneConfig:
     max_steps: int = 50_000                                        # Max number of fine-tuning steps
     save_steps: int = 5000                                          # Interval for checkpoint saving
     learning_rate: float = 5e-4                                     # Fine-tuning learning rate
+    use_lr_decay: bool = True                                       # Whether to decay the learning rate over training
+    warmup_ratio: float = 0.03                                      # Fraction of total steps used for LR warmup
+    min_lr_ratio: float = 0.1                                       # Minimum LR as a fraction of `learning_rate`
     grad_accumulation_steps: int = 1                                # Gradient accumulation steps
     image_aug: bool = True                                          # Whether to train with image augmentations
     shuffle_buffer_size: int = 100_000                              # Dataloader shuffle buffer size (can reduce if OOM)
@@ -349,10 +353,30 @@ def finetune(cfg: FinetuneConfig) -> None:
             )[0]
         )
 
-    # Create Optimizer =>> note that we default to a simple constant learning rate!
+    # Create optimizer and optional learning-rate decay schedule.
     trainable_params = [param for param in vla.parameters() if param.requires_grad]
     trainable_params.extend(param for param in align_projector.parameters() if param.requires_grad)
     optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
+
+    scheduler = None
+    if cfg.use_lr_decay:
+        total_updates = max(1, cfg.max_steps)
+        warmup_updates = int(total_updates * cfg.warmup_ratio)
+        warmup_updates = max(0, min(warmup_updates, total_updates - 1)) if total_updates > 1 else 0
+
+        def lr_lambda(current_step: int) -> float:
+            if warmup_updates > 0 and current_step < warmup_updates:
+                return float(current_step + 1) / float(warmup_updates)
+
+            if total_updates <= warmup_updates + 1:
+                return 1.0
+
+            decay_progress = (current_step - warmup_updates) / float(total_updates - warmup_updates - 1)
+            decay_progress = min(max(decay_progress, 0.0), 1.0)
+            cosine_decay = 0.5 * (1.0 + np.cos(np.pi * decay_progress))
+            return cfg.min_lr_ratio + (1.0 - cfg.min_lr_ratio) * cosine_decay
+
+        scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 
     # Load Fine-tuning Dataset =>> note that we use an RLDS-formatted dataset following Open X-Embodiment by default.
     #   =>> If you want to use a non-RLDS dataset (e.g., a standard PyTorch Dataset) see the following commented block.
@@ -484,6 +508,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                         "align_loss": smoothened_align_loss,
                         "action_accuracy": smoothened_action_accuracy,
                         "l1_loss": smoothened_l1_loss,
+                        "learning_rate": optimizer.param_groups[0]["lr"],
                     },
                     step=gradient_step_idx,
                 )
@@ -491,6 +516,8 @@ def finetune(cfg: FinetuneConfig) -> None:
             # Optimizer 
             if (batch_idx + 1) % cfg.grad_accumulation_steps == 0:
                 optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
                 optimizer.zero_grad()
                 progress.update()
 
