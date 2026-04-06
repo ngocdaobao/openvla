@@ -174,6 +174,7 @@ class FinetuneConfig:
 
     num_temporal_frames: int = 16                                   # Number of temporal frames to use for fine-tuning
     video_prism_path: str = "videoprism_public_v1_base"             # VideoPrism encoder config/checkpoint name
+    freeze_videoprism: bool = True                                  # Keep VideoPrism encoder frozen during training
     videoprism_camera_index: int = 0                                 # Camera index used for VideoPrism input
     align_loss_coeff: float = 0.5                                   # Weight applied to cosine alignment loss
     vla_layer_align: int = -1                                       # Which VLA hidden-state layer to align against
@@ -188,6 +189,7 @@ def run_forward_pass(
     processor,
     batch,
     vla_layer_align: int,
+    freeze_videoprism: bool,
     videoprism_camera_index: int, 
     device_id,
 ):
@@ -224,6 +226,8 @@ def run_forward_pass(
     temporal_features = torch_dlpack.from_dlpack(
         jax_dlpack.to_dlpack(temporal_features)
     ).to(dtype=vision_hidden.dtype)
+    if freeze_videoprism:
+        temporal_features = temporal_features.detach()
     temporal_features = resize_token_sequence(temporal_features, vision_hidden.shape[1])
 
     with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -344,14 +348,26 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     # Compile a single-device VideoPrism inference function once and reuse it.
     with jax.default_device(videoprism_jax_device):
-        videoprism_forward = jax.jit(
-            lambda x: video_prism.apply(
-                video_prism_loaded_state,
-                x,
-                train=False,
-                return_intermediate=("spatial_features",),
-            )[0]
-        )
+        if cfg.freeze_videoprism:
+            videoprism_forward = jax.jit(
+                lambda x: jax.lax.stop_gradient(
+                    video_prism.apply(
+                        video_prism_loaded_state,
+                        x,
+                        train=False,
+                        return_intermediate=("spatial_features",),
+                    )[0]
+                )
+            )
+        else:
+            videoprism_forward = jax.jit(
+                lambda x: video_prism.apply(
+                    video_prism_loaded_state,
+                    x,
+                    train=False,
+                    return_intermediate=("spatial_features",),
+                )[0]
+            )
 
     # Create optimizer and optional learning-rate decay schedule.
     trainable_params = [param for param in vla.parameters() if param.requires_grad]
@@ -450,6 +466,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 processor=processor,
                 batch=batch,
                 vla_layer_align=cfg.vla_layer_align,
+                freeze_videoprism=cfg.freeze_videoprism,
                 videoprism_camera_index=cfg.videoprism_camera_index,
                 device_id=device_id,
             )
