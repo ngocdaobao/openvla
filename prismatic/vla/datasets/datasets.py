@@ -67,7 +67,7 @@ class RLDSBatchTransform:
         )
         if video_frames.shape[-2:] != (288, 288):
             video_frames = F.interpolate(
-                video_frames.unsqueeze(0),
+                video_frames,
                 size=(video_frames.shape[-3], 288, 288),
                 mode="bilinear",
                 align_corners=False,
