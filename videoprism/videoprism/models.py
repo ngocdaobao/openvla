@@ -81,7 +81,7 @@ CHECKPOINTS = {
 
 CONFIGS = {
     'videoprism_v1_base': dict(
-        patch_size=18,
+        patch_size=14,
         pos_emb_shape=(16, 16, 16),
         model_dim=768,
         num_spatial_layers=12,
