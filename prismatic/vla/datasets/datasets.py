@@ -11,6 +11,7 @@ from typing import Any, Dict, Tuple, Type
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import Dataset, IterableDataset
 from transformers import PreTrainedTokenizerBase
@@ -64,6 +65,13 @@ class RLDSBatchTransform:
         video_frames = torch.stack(
             [self.image_transform(Image.fromarray(frame)) for frame in frames]
         )
+        if video_frames.shape[-2:] != (288, 288):
+            video_frames = F.interpolate(
+                video_frames.unsqueeze(0),
+                size=(288, 288),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
 
         # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
         labels[: -(len(action) + 1)] = IGNORE_INDEX
