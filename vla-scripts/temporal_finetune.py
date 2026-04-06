@@ -62,54 +62,54 @@ from videoprism.videoprism import models as vp
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-def _adapt_videoprism_patch_projection_kernel(video_prism, loaded_state):
-    """Resizes patch projection kernel if checkpoint/model patch sizes differ."""
-    try:
-        target_patch_size = int(video_prism.patch_size)
-        target_model_dim = int(video_prism.model_dim)
-        target_in_dim = target_patch_size * target_patch_size * 3
+# def _adapt_videoprism_patch_projection_kernel(video_prism, loaded_state):
+#     """Resizes patch projection kernel if checkpoint/model patch sizes differ."""
+#     try:
+#         target_patch_size = int(video_prism.patch_size)
+#         target_model_dim = int(video_prism.model_dim)
+#         target_in_dim = target_patch_size * target_patch_size * 3
 
-        state = unfreeze(loaded_state)
-        kernel = state["params"]["patch_projection"]["linear"]["kernel"]
-        src_in_dim, src_model_dim = int(kernel.shape[0]), int(kernel.shape[1])
+#         state = unfreeze(loaded_state)
+#         kernel = state["params"]["patch_projection"]["linear"]["kernel"]
+#         src_in_dim, src_model_dim = int(kernel.shape[0]), int(kernel.shape[1])
 
-        if src_in_dim == target_in_dim and src_model_dim == target_model_dim:
-            return loaded_state
+#         if src_in_dim == target_in_dim and src_model_dim == target_model_dim:
+#             return loaded_state
 
-        if src_model_dim != target_model_dim:
-            raise ValueError(
-                f"VideoPrism model_dim mismatch: checkpoint={src_model_dim}, model={target_model_dim}"
-            )
-        if src_in_dim % 3 != 0:
-            raise ValueError(f"Unexpected patch projection kernel input dim: {src_in_dim}")
+#         if src_model_dim != target_model_dim:
+#             raise ValueError(
+#                 f"VideoPrism model_dim mismatch: checkpoint={src_model_dim}, model={target_model_dim}"
+#             )
+#         if src_in_dim % 3 != 0:
+#             raise ValueError(f"Unexpected patch projection kernel input dim: {src_in_dim}")
 
-        src_patch_area = src_in_dim // 3
-        src_patch_size = int(round(src_patch_area ** 0.5))
-        if src_patch_size * src_patch_size != src_patch_area:
-            raise ValueError(
-                f"Cannot infer source patch size from kernel shape {tuple(kernel.shape)}"
-            )
+#         src_patch_area = src_in_dim // 3
+#         src_patch_size = int(round(src_patch_area ** 0.5))
+#         if src_patch_size * src_patch_size != src_patch_area:
+#             raise ValueError(
+#                 f"Cannot infer source patch size from kernel shape {tuple(kernel.shape)}"
+#             )
 
-        kernel_4d = jnp.asarray(kernel).reshape(
-            src_patch_size, src_patch_size, 3, target_model_dim
-        )
-        resized_4d = jax.image.resize(
-            kernel_4d,
-            (target_patch_size, target_patch_size, 3, target_model_dim),
-            method="bilinear",
-        )
-        resized_kernel = np.asarray(resized_4d).reshape(target_in_dim, target_model_dim).astype(np.asarray(kernel).dtype)
+#         kernel_4d = jnp.asarray(kernel).reshape(
+#             src_patch_size, src_patch_size, 3, target_model_dim
+#         )
+#         resized_4d = jax.image.resize(
+#             kernel_4d,
+#             (target_patch_size, target_patch_size, 3, target_model_dim),
+#             method="bilinear",
+#         )
+#         resized_kernel = np.asarray(resized_4d).reshape(target_in_dim, target_model_dim).astype(np.asarray(kernel).dtype)
 
-        state["params"]["patch_projection"]["linear"]["kernel"] = resized_kernel
-        print(
-            "Adapted VideoPrism patch_projection kernel "
-            f"from patch_size={src_patch_size} to patch_size={target_patch_size}."
-        )
-        return freeze(state)
-    except Exception as err:
-        raise RuntimeError(
-            "Failed to adapt VideoPrism patch projection kernel for patch-size mismatch."
-        ) from err
+#         state["params"]["patch_projection"]["linear"]["kernel"] = resized_kernel
+#         print(
+#             "Adapted VideoPrism patch_projection kernel "
+#             f"from patch_size={src_patch_size} to patch_size={target_patch_size}."
+#         )
+#         return freeze(state)
+#     except Exception as err:
+#         raise RuntimeError(
+#             "Failed to adapt VideoPrism patch projection kernel for patch-size mismatch."
+#         ) from err
 
 
 # # === Utilities ===
