@@ -34,6 +34,7 @@ import torch.nn.functional as F
 import tqdm
 import jax
 import jax.numpy as jnp
+from jax import dlpack as jax_dlpack
 from accelerate import PartialState
 from flax.core import freeze, unfreeze
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
@@ -45,6 +46,7 @@ from transformers import AutoConfig, AutoImageProcessor
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 import wandb
+from torch.utils import dlpack as torch_dlpack
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder, VicunaV15ChatPromptBuilder
 from prismatic.util.data_utils import PaddedCollatorForActionPrediction
 from prismatic.vla.action_tokenizer import ActionTokenizer
@@ -177,14 +179,12 @@ class FinetuneConfig:
 
 def run_forward_pass(
     vla,
-    video_encoder,
+    videoprism_forward,
     align_projector,
     processor,
     batch,
     vla_layer_align: int,
     videoprism_camera_index: int, 
-    video_encoder_loaded_state,
-    videoprism_jax_device,
     device_id,
 ):
 
@@ -204,24 +204,22 @@ def run_forward_pass(
     layer_h = output.hidden_states[vla_layer_align]
     vision_hidden = layer_h[:, :num_vision_tokens, :]
 
-    videoprism_inputs = prepare_videoprism_inputs(
+    videoprism_inputs_torch = prepare_videoprism_inputs(
         batch["video_frames"].to(device_id),
         processor.image_processor,
         camera_index=videoprism_camera_index,
     )
-
-    with jax.default_device(videoprism_jax_device):
-        temporal_features, _ = video_encoder.apply(
-            video_encoder_loaded_state,
-            videoprism_inputs,
-            train=False,
-            return_intermediate=("spatial_features",),
-        )
-    
-    temporal_features_np = np.array(temporal_features, copy=True)
-    temporal_features = torch.from_numpy(temporal_features_np).to(
-        device=torch.device(f"cuda:{device_id}"), dtype=vision_hidden.dtype
+    # Zero-copy PyTorch -> JAX on the same GPU.
+    videoprism_inputs = jax_dlpack.from_dlpack(
+        torch_dlpack.to_dlpack(videoprism_inputs_torch)
     )
+
+    temporal_features = videoprism_forward(videoprism_inputs)
+    
+    # Zero-copy JAX -> PyTorch on the same GPU.
+    temporal_features = torch_dlpack.from_dlpack(
+        jax_dlpack.to_dlpack(temporal_features)
+    ).to(dtype=vision_hidden.dtype)
     temporal_features = resize_token_sequence(temporal_features, vision_hidden.shape[1])
 
     with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -340,6 +338,17 @@ def finetune(cfg: FinetuneConfig) -> None:
         gradient_as_bucket_view=True,
     )
 
+    # Compile a single-device VideoPrism inference function once and reuse it.
+    with jax.default_device(videoprism_jax_device):
+        videoprism_forward = jax.jit(
+            lambda x: video_prism.apply(
+                video_prism_loaded_state,
+                x,
+                train=False,
+                return_intermediate=("spatial_features",),
+            )[0]
+        )
+
     # Create Optimizer =>> note that we default to a simple constant learning rate!
     trainable_params = [param for param in vla.parameters() if param.requires_grad]
     trainable_params.extend(param for param in align_projector.parameters() if param.requires_grad)
@@ -412,14 +421,12 @@ def finetune(cfg: FinetuneConfig) -> None:
         for batch_idx, batch in enumerate(dataloader):
             output, action_loss, align_loss = run_forward_pass(
                 vla=vla,
-                video_encoder=video_prism,
+                videoprism_forward=videoprism_forward,
                 align_projector=align_projector,
                 processor=processor,
                 batch=batch,
                 vla_layer_align=cfg.vla_layer_align,
                 videoprism_camera_index=cfg.videoprism_camera_index,
-                video_encoder_loaded_state=video_prism_loaded_state,
-                videoprism_jax_device=videoprism_jax_device,
                 device_id=device_id,
             )
             loss = action_loss + cfg.align_loss_coeff * align_loss

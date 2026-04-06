@@ -31,7 +31,7 @@ def prepare_videoprism_inputs(
     video_frames: torch.Tensor,
     image_processor: PrismaticImageProcessor,
     camera_index: int = 0, # 0 for third-person view, 1 for wrist-camera view
-) -> np.ndarray:
+) -> torch.Tensor:
 
     if video_frames.ndim == 5:
         num_channels = video_frames.shape[2]
@@ -51,7 +51,8 @@ def prepare_videoprism_inputs(
             end = start + 3
             video_frames = video_frames[:, :, start:end, :, :]
 
-    return video_frames.permute(0, 1, 3, 4, 2).contiguous().float().cpu().numpy()
+    # VideoPrism expects [B, T, H, W, C] float32.
+    return video_frames.permute(0, 1, 3, 4, 2).contiguous().float()
 
 
 def resize_token_sequence(features: torch.Tensor, target_tokens: int) -> torch.Tensor:

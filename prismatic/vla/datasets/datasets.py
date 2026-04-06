@@ -71,7 +71,7 @@ class RLDSBatchTransform:
                 size=(288, 288),
                 mode="bilinear",
                 align_corners=False,
-            ).squeeze(0)
+            )
 
         # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
         labels[: -(len(action) + 1)] = IGNORE_INDEX
