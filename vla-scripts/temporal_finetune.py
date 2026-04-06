@@ -216,7 +216,10 @@ def run_forward_pass(
         train=False,
         return_intermediate=("spatial_features",),
     )
-    temporal_features = torch.from_numpy(np.asarray(temporal_features)).to(device_id=device_id, dtype=vision_hidden.dtype)
+    temporal_features_np = np.array(temporal_features, copy=True)
+    temporal_features = torch.from_numpy(temporal_features_np).to(
+        device=torch.device(f"cuda:{device_id}"), dtype=vision_hidden.dtype
+    )
     temporal_features = resize_token_sequence(temporal_features, vision_hidden.shape[1])
 
     with torch.autocast("cuda", dtype=torch.bfloat16):
