@@ -143,6 +143,8 @@ class PaddedCollatorForActionPrediction:
         )
         if video_frames is not None:
             output["video_frames"] = torch.stack(video_frames)
+        if "pad_mask" in instances[0]:
+            output["pad_mask"] = torch.stack([instance["pad_mask"] for instance in instances])
         if dataset_names is not None:
             output["dataset_names"] = dataset_names
         return output

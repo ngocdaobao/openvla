@@ -63,7 +63,22 @@ def resize_token_sequence(features: torch.Tensor, target_tokens: int) -> torch.T
     return features.transpose(1, 2)
 
 
-def compute_cosine_align_loss(projected_temporal: torch.Tensor, vision_hidden: torch.Tensor) -> torch.Tensor:
+def compute_cosine_align_loss(
+    projected_temporal: torch.Tensor,
+    vision_hidden: torch.Tensor,
+    pad_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
     projected_temporal = F.normalize(projected_temporal.float(), dim=-1)
     vision_hidden = F.normalize(vision_hidden.float(), dim=-1)
-    return 1.0 - F.cosine_similarity(projected_temporal, vision_hidden, dim=-1).mean()
+    cos_sim = F.cosine_similarity(projected_temporal, vision_hidden, dim=-1)  # [B, T]
+
+    if pad_mask is not None:
+        # Expand pad_mask [B, num_frames] to match token dim [B, T]
+        pad_mask = pad_mask.to(cos_sim.device).float()
+        pad_mask = F.interpolate(
+            pad_mask.unsqueeze(1), size=cos_sim.shape[1], mode="nearest"
+        ).squeeze(1)  # [B, T]
+        cos_sim = cos_sim * pad_mask
+        return 1.0 - cos_sim.sum() / pad_mask.sum().clamp(min=1)
+
+    return 1.0 - cos_sim.mean()

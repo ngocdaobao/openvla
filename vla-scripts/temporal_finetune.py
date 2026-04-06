@@ -150,7 +150,7 @@ class FinetuneConfig:
     max_steps: int = 50_000                                        # Max number of fine-tuning steps
     save_steps: int = 5000                                          # Interval for checkpoint saving
     learning_rate: float = 5e-4                                     # Fine-tuning learning rate
-    use_lr_decay: bool = True                                       # Whether to decay the learning rate over training
+    use_lr_decay: bool = False                                       # Whether to decay the learning rate over training
     warmup_ratio: float = 0.03                                      # Fraction of total steps used for LR warmup
     min_lr_ratio: float = 0.1                                       # Minimum LR as a fraction of `learning_rate`
     grad_accumulation_steps: int = 1                                # Gradient accumulation steps
@@ -234,7 +234,9 @@ def run_forward_pass(
 
     with torch.autocast("cuda", dtype=torch.bfloat16):
         projected_temporal = align_projector(temporal_features)
-        align_loss = compute_cosine_align_loss(projected_temporal, vision_hidden)
+        align_loss = compute_cosine_align_loss(
+            projected_temporal, vision_hidden, pad_mask=batch.get("pad_mask"),
+        )
     return output, action_loss, align_loss
 
 

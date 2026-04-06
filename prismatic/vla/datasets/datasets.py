@@ -39,9 +39,10 @@ class RLDSBatchTransform:
 
     def __call__(self, rlds_batch: Dict[str, Any]) -> Dict[str, Any]:
         """Converts a RLDS batch to the format expected by the OpenVLA collator/models."""
-        dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
+        dataset_name = rlds_batch["dataset_name"]
         frames = rlds_batch["observation"]["image_primary"]
         current_index = max(self.window_size - 1, 0)
+        action = rlds_batch["action"][current_index]
         img = Image.fromarray(frames[current_index])
         lang = rlds_batch["task"]["language_instruction"].decode().lower()
 
@@ -73,6 +74,9 @@ class RLDSBatchTransform:
                 align_corners=False,
             )
 
+        # pad_mask: True for real frames, False for padded (repeated frame-0) frames
+        pad_mask = torch.tensor(rlds_batch["observation"]["pad_mask"], dtype=torch.bool)
+
         # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
         labels[: -(len(action) + 1)] = IGNORE_INDEX
         if not self.predict_stop_token:
@@ -81,6 +85,7 @@ class RLDSBatchTransform:
         return dict(
             pixel_values=pixel_values,
             video_frames=video_frames,
+            pad_mask=pad_mask,
             input_ids=input_ids,
             labels=labels,
             dataset_name=dataset_name,
