@@ -184,6 +184,7 @@ def run_forward_pass(
     vla_layer_align: int,
     videoprism_camera_index: int, 
     video_encoder_loaded_state,
+    videoprism_jax_device,
     device_id,
 ):
 
@@ -209,12 +210,13 @@ def run_forward_pass(
         camera_index=videoprism_camera_index,
     )
 
-    temporal_features, _ = video_encoder.apply(
-        video_encoder_loaded_state,
-        videoprism_inputs,
-        train=False,
-        return_intermediate=("spatial_features",),
-    )
+    with jax.default_device(videoprism_jax_device):
+        temporal_features, _ = video_encoder.apply(
+            video_encoder_loaded_state,
+            videoprism_inputs,
+            train=False,
+            return_intermediate=("spatial_features",),
+        )
     
     temporal_features_np = np.array(temporal_features, copy=True)
     temporal_features = torch.from_numpy(temporal_features_np).to(
@@ -239,6 +241,18 @@ def finetune(cfg: FinetuneConfig) -> None:
     distributed_state = PartialState()
     torch.cuda.set_device(device_id := distributed_state.local_process_index)
     torch.cuda.empty_cache()
+
+    # Pin VideoPrism (JAX) execution to the same per-rank GPU used by this process.
+    jax_gpu_devices = [d for d in jax.devices() if d.platform == "gpu"]
+    if jax_gpu_devices:
+        if device_id >= len(jax_gpu_devices):
+            raise RuntimeError(
+                f"LOCAL_RANK {device_id} exceeds available JAX GPUs ({len(jax_gpu_devices)})."
+            )
+        videoprism_jax_device = jax_gpu_devices[device_id]
+    else:
+        videoprism_jax_device = jax.devices()[0]
+    print(f"Rank {device_id}: VideoPrism JAX device -> {videoprism_jax_device}")
 
     # Configure Unique Experiment ID & Log Directory
     exp_id = (
@@ -405,6 +419,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 vla_layer_align=cfg.vla_layer_align,
                 videoprism_camera_index=cfg.videoprism_camera_index,
                 video_encoder_loaded_state=video_prism_loaded_state,
+                videoprism_jax_device=videoprism_jax_device,
                 device_id=device_id,
             )
             loss = action_loss + cfg.align_loss_coeff * align_loss

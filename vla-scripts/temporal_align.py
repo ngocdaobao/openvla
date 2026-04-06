@@ -52,7 +52,6 @@ def prepare_videoprism_inputs(
             end = start + 3
             video_frames = video_frames[:, :, start:end, :, :]
 
-    print(f"Using single-camera video shape: {video_frames.shape}")
     return video_frames.permute(0, 1, 3, 4, 2).contiguous().float().cpu().numpy()
 
 
