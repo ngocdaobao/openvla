@@ -27,8 +27,32 @@ class TemporalAlignProjector(nn.Module):
         return self.projector(temporal_features)
 
 
-def prepare_videoprism_inputs(video_frames: torch.Tensor, image_processor: PrismaticImageProcessor) -> np.ndarray:
+def prepare_videoprism_inputs(
+    video_frames: torch.Tensor,
+    image_processor: PrismaticImageProcessor,
+    camera_index: int = 0,
+) -> np.ndarray:
     print(f"Original video frames shape: {video_frames.shape}")
+    
+    if video_frames.ndim == 5:
+        num_channels = video_frames.shape[2]
+        if num_channels % 3 != 0:
+            raise ValueError(
+                f"Expected channel dimension to be RGB or concatenated RGB multiples of 3, got C={num_channels}"
+            )
+
+        num_cameras = num_channels // 3
+        if not (0 <= camera_index < num_cameras):
+            raise ValueError(
+                f"camera_index={camera_index} out of bounds for {num_cameras} concatenated camera views"
+            )
+
+        if num_cameras > 1:
+            start = camera_index * 3
+            end = start + 3
+            video_frames = video_frames[:, :, start:end, :, :]
+
+    print(f"Using single-camera video shape: {video_frames.shape}")
     return video_frames.permute(0, 1, 3, 4, 2).contiguous().float().cpu().numpy()
 
 

@@ -397,7 +397,7 @@ class FactorizedEncoder(layers.Module):
   Reference: https://arxiv.org/abs/2103.15691
   """
 
-  patch_size: int = 18
+  patch_size: int = 14
   pos_emb_shape: tuple[int, int, int] = (16, 16, 16)
   model_dim: int = 768
   num_spatial_layers: int = 12

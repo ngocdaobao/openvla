@@ -115,6 +115,7 @@ class FinetuneConfig:
 
     num_temporal_frames: int = 16                                   # Number of temporal frames to use for fine-tuning
     video_prism_path: str = "videoprism_public_v1_base"             # VideoPrism encoder config/checkpoint name
+    videoprism_camera_index: int = 0                                 # Camera index used for VideoPrism input
     align_loss_coeff: float = 0.5                                   # Weight applied to cosine alignment loss
     vla_layer_align: int = -1                                       # Which VLA hidden-state layer to align against
     # fmt: on
@@ -128,6 +129,7 @@ def run_forward_pass(
     processor,
     batch,
     vla_layer_align: int,
+    videoprism_camera_index: int,
     video_encoder_loaded_state,
     device_id,
 ):
@@ -150,7 +152,11 @@ def run_forward_pass(
     layer_h = output.hidden_states[vla_layer_align]
     vision_hidden = layer_h[:, :num_vision_tokens, :]
 
-    videoprism_inputs = prepare_videoprism_inputs(batch["video_frames"].to(device_id), processor.image_processor)
+    videoprism_inputs = prepare_videoprism_inputs(
+        batch["video_frames"].to(device_id),
+        processor.image_processor,
+        camera_index=videoprism_camera_index,
+    )
     temporal_features, _ = video_encoder.apply(
         video_encoder_loaded_state,
         videoprism_inputs,
@@ -338,6 +344,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 processor=processor,
                 batch=batch,
                 vla_layer_align=cfg.vla_layer_align,
+                videoprism_camera_index=cfg.videoprism_camera_index,
                 video_encoder_loaded_state=video_prism_loaded_state,
                 device_id=device_id,
             )
