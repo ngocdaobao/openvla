@@ -206,9 +206,11 @@ def run_forward_pass(
     action_loss = output.loss
 
     # Extract vision hidden states from the selected layer.
+    # Detach so that align loss only trains the projector, not the VLA backbone.
+    # Without detach, align gradients conflict with action gradients and destabilize training.
     num_vision_tokens = output.projector_features.shape[1]
     layer_h = output.hidden_states[vla_layer_align]
-    vision_hidden = layer_h[:, :num_vision_tokens, :]
+    vision_hidden = layer_h[:, :num_vision_tokens, :].detach()
 
     videoprism_inputs_torch = prepare_videoprism_inputs(
         batch["video_frames"].to(device_id),
