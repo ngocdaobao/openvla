@@ -129,7 +129,7 @@ def run_forward_pass(
     processor,
     batch,
     vla_layer_align: int,
-    videoprism_camera_index: int,
+    videoprism_camera_index: int, 
     video_encoder_loaded_state,
     device_id,
 ):

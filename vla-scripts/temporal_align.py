@@ -30,10 +30,10 @@ class TemporalAlignProjector(nn.Module):
 def prepare_videoprism_inputs(
     video_frames: torch.Tensor,
     image_processor: PrismaticImageProcessor,
-    camera_index: int = 0,
+    camera_index: int = 0, # 0 for third-person view, 1 for wrist-camera view
 ) -> np.ndarray:
     print(f"Original video frames shape: {video_frames.shape}")
-    
+
     if video_frames.ndim == 5:
         num_channels = video_frames.shape[2]
         if num_channels % 3 != 0:
