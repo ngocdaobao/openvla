@@ -203,7 +203,7 @@ def run_forward_pass(
             output_hidden_states=True,
         )
 
-    loss = output.loss
+    action_loss = output.loss
 
     # Extract vision hidden states from the selected layer.
     num_vision_tokens = output.projector_features.shape[1]
@@ -233,9 +233,7 @@ def run_forward_pass(
     with torch.autocast("cuda", dtype=torch.bfloat16):
         projected_temporal = align_projector(temporal_features)
         align_loss = compute_cosine_align_loss(projected_temporal, vision_hidden)
-    loss += align_loss
-
-    return output, loss, align_loss
+    return output, action_loss, align_loss
 
 
 @draccus.wrap()
