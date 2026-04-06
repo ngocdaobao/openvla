@@ -144,7 +144,7 @@ class FinetuneConfig:
 
     # Fine-tuning Parameters
     batch_size: int = 16                                            # Fine-tuning batch size
-    max_steps: int = 200_000                                        # Max number of fine-tuning steps
+    max_steps: int = 50_000                                        # Max number of fine-tuning steps
     save_steps: int = 5000                                          # Interval for checkpoint saving
     learning_rate: float = 5e-4                                     # Fine-tuning learning rate
     grad_accumulation_steps: int = 1                                # Gradient accumulation steps
@@ -197,9 +197,7 @@ def run_forward_pass(
         )
 
     loss = output.loss
-    print(f'Shape of output hidden states: {output.hidden_states[-1].shape}')
-    print(f'Shape of vision hidden states: {output.projector_features.shape}')
-    print(f'Shape of language instruction features: {batch["input_ids"].shape}')
+
     # Extract vision hidden states from the selected layer.
     num_vision_tokens = output.projector_features.shape[1]
     layer_h = output.hidden_states[vla_layer_align]
@@ -210,12 +208,14 @@ def run_forward_pass(
         processor.image_processor,
         camera_index=videoprism_camera_index,
     )
+
     temporal_features, _ = video_encoder.apply(
         video_encoder_loaded_state,
         videoprism_inputs,
         train=False,
         return_intermediate=("spatial_features",),
     )
+    
     temporal_features_np = np.array(temporal_features, copy=True)
     temporal_features = torch.from_numpy(temporal_features_np).to(
         device=torch.device(f"cuda:{device_id}"), dtype=vision_hidden.dtype
