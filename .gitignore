@@ -158,4 +158,4 @@ videoprism
 jax_check.py
 run.sh
 runs/
-adapter-tmp/
+adapter*/
