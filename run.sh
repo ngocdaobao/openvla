@@ -1,0 +1,2 @@
+export WANDB_API_KEY=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
+torchrun --nproc-per-node=8 --master_addr=127.0.0.1 --master_port=29500 vla-scripts/finetune_jepa.py 

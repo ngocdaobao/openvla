@@ -151,3 +151,9 @@ data/
 # Rollout videos and wandb logs
 rollouts/
 wandb/
+
+jepa_ckpt/
+.log
+videoprism
+jax_check.py
+ru

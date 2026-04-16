@@ -1,1 +1,1 @@
-from .openvla import OpenVLA
+from .openvla import OpenVLA, OpenVLA_Temporal_Finetune
