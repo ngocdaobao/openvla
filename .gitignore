@@ -156,4 +156,6 @@ jepa_ckpt/
 .log
 videoprism
 jax_check.py
-ru
+run.sh
+runs/
+adapter-tmp/
