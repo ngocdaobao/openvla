@@ -150,7 +150,7 @@ class OpenVLA_Temporal_Finetune(OpenVLA):
 
         self.encoder = encoder
         self.resize_length = resize_length
-        self.patch_dim = self.encoder.num_tokens * self.encoder.embed_dim // self.resize_length
+        self.patch_dim = self.encoder.backbone.num_tokens * self.encoder.backbone.embed_dim // self.resize_length
 
         self.proj = nn.Linear(self.patch_dim, self.llm_backbone.embed_dim)
         nn.init.xavier_uniform_(self.proj.weight)
@@ -242,7 +242,7 @@ class OpenVLA_Temporal_Finetune(OpenVLA):
             video = torch.stack(cache_history, dim=2).to(projected_patch_embeddings.device)
             with torch.no_grad():
                 temporal_embed = self.encoder(video)
-            temporal_embed = temporal_embed.reshape(temporal_embed.shape[0], self.encoder.num_tokens * self.encoder.embed_dim)
+            temporal_embed = temporal_embed.reshape(temporal_embed.shape[0], self.encoder.backbone.num_tokens * self.encoder.backbone.embed_dim)
             temporal_embed = temporal_embed.reshape(temporal_embed.shape[0], self.resize_length, self.patch_dim)
             temporal_embed = self.proj(temporal_embed)
         elif use_encoder and cache_history is None:

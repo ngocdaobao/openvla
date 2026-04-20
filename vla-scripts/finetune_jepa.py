@@ -87,8 +87,8 @@ class FinetuneConfig:
 
     # Fine-tuning Parameters
     batch_size: int = 8                                             # Fine-tuning batch size
-    max_steps: int = 25_000                                         # Max number of fine-tuning steps
-    save_steps: int = 25_000                                          # Interval for checkpoint saving
+    max_steps: int = 50_000                                         # Max number of fine-tuning steps
+    save_steps: int = 2                                          # Interval for checkpoint saving
     learning_rate: float = 5e-4                                     # Fine-tuning learning rate
     grad_accumulation_steps: int = 1                                # Gradient accumulation steps
     image_aug: bool = True                                          # Whether to train with image augmentations
@@ -110,7 +110,7 @@ class FinetuneConfig:
 
     # fmt: on
     # JEPA config
-    use_encoder: bool = False
+    use_encoder: bool = True
     ckpt_path: str = "jepa_ckpt/vitl16.pth.tar"
     jepa_patch_size: int = 16
     jepa_num_frames: int = 16
@@ -294,6 +294,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             k.replace('module.backbone.', ''): v
             for k, v in ckpt['encoder'].items()
         }
+        
         encoder.backbone.load_state_dict(encoder_state_dict)
         encoder.to(device_id)
         encoder.eval()
@@ -499,7 +500,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 progress.update()
 
             # Save Model Checkpoint =>> by default, only keeps the latest checkpoint, continually overwriting it!
-            if gradient_step_idx > 0 and gradient_step_idx % cfg.save_steps == 0:
+            if gradient_step_idx > 0 and gradient_step_idx in [30000,40000,50000]:
                 if distributed_state.is_main_process:
                     print(f"Saving Model Checkpoint for Step {gradient_step_idx}")
 
@@ -528,7 +529,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 # Merge LoRA weights into model backbone for faster inference
                 #   =>> Note that merging is slow and can be done post-hoc to speed up training
                 if cfg.use_lora:
-                    base_vla = load_vla(cfg.vla_path, load_for_training=True)
+                    base_vla = load_openvla_from_hf_local(encoder, cfg.vla_path, load_for_training=True)
                     merged_vla = PeftModel.from_pretrained(base_vla, adapter_dir)
                     merged_vla = merged_vla.merge_and_unload()
                     if distributed_state.is_main_process:
