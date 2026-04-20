@@ -77,7 +77,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 class FinetuneConfig:
     # fmt: off
     vla_path: str = "/pfss/mlde/workspaces/mlde_wsp_IAS_SAMMerge/VLA/ngoc/openvla-7b"  # Local HF dir | local .pt file | native ID on openvla/openvla-dev
-                                                                    #   OR absolute path to a local .pt checkpoint file
+    ckpt_path: str = "runs/openvla-7b+libero_goal_no_noops+b8+lr-0.0005+lora-r32+dropout-0.0--image_aug/checkpoints/latest-checkpoint.pt"                                                              #   OR absolute path to a local .pt checkpoint file
 
     # Directory Paths
     data_root_dir: Path = Path("/pfss/mlde/workspaces/mlde_wsp_IAS_SAMMerge/VLA/ngoc/modified_libero_rlds")        # Path to Open-X dataset directory
@@ -87,7 +87,7 @@ class FinetuneConfig:
 
     # Fine-tuning Parameters
     batch_size: int = 8                                             # Fine-tuning batch size
-    max_steps: int = 50_000                                         # Max number of fine-tuning steps
+    max_steps: int = 20_000                                         # Max number of fine-tuning steps
     save_steps: int = 2                                          # Interval for checkpoint saving
     learning_rate: float = 5e-4                                     # Fine-tuning learning rate
     grad_accumulation_steps: int = 1                                # Gradient accumulation steps
@@ -309,7 +309,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     else:
         # Local .pt file OR native model ID in openvla/openvla-dev HF repo
         vla = load_vla(cfg.vla_path, load_for_training=True)
-
+    vla.load_state_dict(cfg.ckpt_path)
     # Extract tokenizer, image_transform, and other attributes BEFORE LoRA/DDP wrapping
     tokenizer = vla.llm_backbone.tokenizer
     image_transform = vla.vision_backbone.image_transform
@@ -500,7 +500,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 progress.update()
 
             # Save Model Checkpoint =>> by default, only keeps the latest checkpoint, continually overwriting it!
-            if gradient_step_idx > 0 and gradient_step_idx in [30000,40000,50000]:
+            if gradient_step_idx > 0 and gradient_step_idx in [10000, 20000]:
                 if distributed_state.is_main_process:
                     print(f"Saving Model Checkpoint for Step {gradient_step_idx}")
 
